@@ -16,6 +16,11 @@ body{font-family:Inter,"Segoe UI",Arial,sans-serif;color:#19314f;background:#f3f
 .tab[aria-selected="true"]{background:#ebf4fd;color:#124c7c}
 .tab[aria-selected="true"]:after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:3px;background:#1a779b;border-radius:3px 3px 0 0}
 .tab:focus-visible{outline:2px solid #399bc6;outline-offset:-3px}
+/* Dashboard tabs are unavailable while an Explore detail view is open. */
+.tab:disabled{cursor:not-allowed;opacity:.65;background:#f0f2f5;color:#8b97a6}
+.tab[aria-selected="true"]:disabled{opacity:.88;background:#ebf4fd;color:#537999}
+.tab:disabled:hover{background:#f0f2f5;color:#8b97a6}
+.tab[aria-selected="true"]:disabled:hover{background:#ebf4fd;color:#537999}
 .content{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden;background:#f3f6fa}
 .dashboard-frame{position:absolute;left:0;top:0;display:block;margin:0;padding:0;border:0;background:#f3f6fa;transform-origin:top left;overflow:hidden}
 .dashboard-frame[hidden]{display:none}
@@ -42,6 +47,22 @@ const loaded={fleet:false,driver:false};
 const tabs=[...document.querySelectorAll('[data-panel]')];
 const content=document.getElementById('content');
 let active='fleet';
+const drillObservers={fleet:null,driver:null};
+// Monitor the dashboard's own detail-view class; no changes to the embedded dashboard.
+function isDrilled(){
+ const doc=frames[active].contentDocument;
+ if(!doc || !doc.body)return false;
+ return active==='fleet'?doc.body.classList.contains('in-drill'):
+   !doc.body.classList.contains('landing-mode');
+}
+function refreshDashboardTabs(){
+ const locked=isDrilled();
+ for(const tab of tabs){
+   tab.disabled=locked;
+   tab.setAttribute('aria-disabled',String(locked));
+   tab.title=locked?'Return to the dashboard landing screen to switch tabs':'';
+ }
+}
 function decode64(b64){const data=atob(b64);return new TextDecoder().decode(Uint8Array.from(data,c=>c.charCodeAt(0)));}
 function ensureLoaded(name){
  if(loaded[name])return;
@@ -49,6 +70,11 @@ function ensureLoaded(name){
    const doc=frames[name].contentDocument;
    if(!doc || doc.getElementById('screen-fit-overrides'))return;
    const style=doc.createElement('style');style.id='screen-fit-overrides';style.textContent=overrides[name];doc.head.appendChild(style);
+   // Fleet: body.in-drill. Driver: absence of body.landing-mode.
+   if(drillObservers[name])drillObservers[name].disconnect();
+   drillObservers[name]=new MutationObserver(refreshDashboardTabs);
+   drillObservers[name].observe(doc.body,{attributes:true,attributeFilter:['class']});
+   refreshDashboardTabs();
    fit();
  });
  frames[name].srcdoc=decode64(source[name]);
@@ -69,11 +95,13 @@ function fit(){
  }
 }
 function select(name,focus=false){
- if(!frames[name])return;
+ // Prevent tab switching from mouse, keyboard, or programmatic calls during Explore.
+ if(!frames[name]||(name!==active&&isDrilled()))return;
  active=name;
  ensureLoaded(name);
  for(const tab of tabs){const selected=tab.dataset.panel===name;tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;if(selected&&focus)tab.focus();}
  for(const [key,frame] of Object.entries(frames))frame.hidden=key!==name;
+ refreshDashboardTabs();
  fit();
 }
 tabs.forEach((tab,index)=>{
